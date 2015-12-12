@@ -2,16 +2,42 @@ import React from 'react';
 import d3 from 'd3';
 import nv from 'nvd3';
 import {pick, without} from './utils.js'
+import assign from 'object-assign';
+import MyDebug from 'debug';
 
-let SETTINGS = ['x', 'y', 'width', 'height', 'type', 'datum', 'configure'];
-let AXIS_NAMES = ['xAxis', 'yAxis','y1Axis', 'y2Axis','y3Axis' , 'y4Axis', 'x2Axis'];
+let SETTINGS = ['x', 'y', 'width', 'height', 'type', 'dataSource', 'configure'];
+let AXIS_NAMES = ['xAxis', 'yAxis','y1Axis', 'y2Axis', 'y3Axis', 'y4Axis', 'x2Axis'];
 let SIZE = ['width', 'height'];
 let MARGIN = 'margin';
 
+var isArray = Array.isArray;
+
+var log = MyDebug('NV3DChart');
+
 export default class NVD3Chart extends React.Component {
-  static propTypes: {
+  static propTypes = {
     type: React.PropTypes.string.isRequired,
-    configure: React.PropTypes.func
+    configure: React.PropTypes.func,
+    onDataSourceResponse: React.PropTypes.func,
+    onDataSourceSuccess: React.PropTypes.func,
+    onDataSourceError: React.PropTypes.func,
+    debug: React.PropTypes.bool
+  };
+
+  static defaultProps = {
+    debug: false
+  }
+
+  state = {
+  };
+
+  constructor(props) {
+    super(props);
+    this.props.debug ? MyDebug.enable('NV3DChart') : MyDebug.disable('NV3DChart');
+  }
+
+  componentWillMount() {
+    log('componentWillMount()');
   }
 
   /**
@@ -19,6 +45,12 @@ export default class NVD3Chart extends React.Component {
    * a callback if exists
    */
   componentDidMount() {
+    log('componentDidMount()');
+
+    if (this.isRemoteDataSource(this.props)){
+      this.loadDataSource(this.props.dataSource, this.props)
+    }
+
     nv.addGraph(this.renderChart.bind(this), this.props.renderEnd);
   }
 
@@ -26,38 +58,49 @@ export default class NVD3Chart extends React.Component {
    * Update the chart after state is changed.
    */
   componentDidUpdate() {
-    this.renderChart();
+    log('componentDidUpdate()');
+
+    this.graphAdded ? 
+      this.renderChart():
+      nv.addGraph(this.renderChart.bind(this), this.props.renderEnd);
   }
 
   /**
    * Creates a chart model and render it
    */
   renderChart() {
-      // Margins are an special case. It needs to be
-      // passed to the margin function.
-      this.chart = this.chart || nv.models[this.props.type]();
+    log('renderChart()');
 
-      this.chart
-        .x(this.getValueFunction(this.props.x, 'x'))
-        .y(this.getValueFunction(this.props.y, 'y'))
-        .margin(this.options(MARGIN, pick).margin || this.propsByPrefix('margin') || {})
-        .options(this.options(SETTINGS.concat(AXIS_NAMES, SIZE, MARGIN), without));
+    if (!this.data.length) {
+      log('no data, so skip renderring chart');
+      return;
+    }
 
-      // We need to set the axis options separatly
-      this.setAxisOptions(this.chart, this.options(AXIS_NAMES));
+    // Margins are an special case. It needs to be
+    // passed to the margin function.
+    this.chart = this.chart || nv.models[this.props.type]();
 
-      // hook for configuring the chart
-      !this.props.configure || this.props.configure(this.chart);
+    this.chart
+      .x(this.getValueFunction(this.props.x, 'x'))
+      .y(this.getValueFunction(this.props.y, 'y'))
+      .margin(this.options(MARGIN, pick).margin || this.propsByPrefix('margin') || {})
+      .options(this.options(SETTINGS.concat(AXIS_NAMES, SIZE, MARGIN), without));
 
-      // Render chart using d3
-      d3.select(this.refs.svg)
-        .datum(this.props.datum)
-        .call(this.chart);
+    // We need to set the axis options separatly
+    this.setAxisOptions(this.chart, this.options(AXIS_NAMES));
 
-      // Update the chart if the window size change.
-      // TODO: review posible leak.
-      nv.utils.windowResize(this.chart.update);
-      return this.chart;
+    // hook for configuring the chart
+    !this.props.configure || this.props.configure(this.chart);
+
+    // Render chart using d3
+    d3.select(this.refs.svg)
+      .datum(this.data)
+      .call(this.chart);
+
+    // Update the chart if the window size change.
+    // TODO: review posible leak.
+    nv.utils.windowResize(this.chart.update);
+    return this.chart;
   }
 
   /**
@@ -118,11 +161,166 @@ export default class NVD3Chart extends React.Component {
     }, {});
   }
 
+  prepareProps(thisProps, state) {
+    var props = assign({}, thisProps)
+
+    props.data = this.prepareData(props)
+    props.dataSource = this.prepareDataSource(props)
+
+    return props
+  }
+
+  /**
+   * Returns true if in the current configuration,
+   * the datagrid should load its data remotely.
+   *
+   * @param  {Object}  [props] Optional. If not given, this.props will be used
+   * @return {Boolean}
+   */
+  isRemoteDataSource(props) {
+    props = props || this.props;
+
+    return props.dataSource && !isArray(props.dataSource);
+  }
+
+  prepareDataSource(props) {
+    var dataSource = props.dataSource;
+
+    if (isArray(dataSource)) {
+      dataSource = null;
+    }
+
+    return dataSource;
+  }
+
+  prepareData(props) {
+
+    var data = null;
+
+    if (isArray(props.data)) {
+      data = props.data;
+    }
+
+    if (isArray(props.dataSource)) {
+      data = props.dataSource;
+    }
+
+    data = data == null? this.state.defaultData: data;
+
+    if (!isArray(data)) {
+      data = [];
+    }
+
+    return data;
+  }
+
+  /**
+   * Loads remote data
+   *
+   * @param  {String/Function/Promise} [dataSource]
+   * @param  {Object} [props]
+   */
+  loadDataSource(dataSource, props) {
+    log('loadDataSource()');
+
+    props = props || this.props;
+
+    if (!arguments.length) {
+      dataSource = props.dataSource;
+    }
+
+    if (typeof dataSource == 'function') {
+      dataSource = dataSource(props);
+    }
+
+    if (typeof dataSource == 'string') {
+      var fetch = this.props.fetch || global.fetch;
+
+      dataSource = fetch(dataSource);
+    }
+
+    if (dataSource && dataSource.then) {
+
+      if (props.onDataSourceResponse){
+        dataSource.then(props.onDataSourceResponse, props.onDataSourceResponse);
+      } else {
+
+        var errorFn = function(err) {
+          if (props.onDataSourceError) {
+            props.onDataSourceError(err)
+          }
+        }.bind(this);
+
+        var noCatchFn = dataSource['catch'] ? null: errorFn;
+
+        dataSource = dataSource
+          .then(function (response) {
+            return response && typeof response.json == 'function'?
+                response.json():
+                response;
+          })
+          .then(function (json) {
+
+            if (props.onDataSourceSuccess) {
+              props.onDataSourceSuccess(json);
+              return;
+            }
+
+            var info;
+            if (typeof props.getDataSourceInfo == 'function'){
+              info = props.getDataSourceInfo(json);
+            }
+
+            var data = info?
+                info.data:
+                Array.isArray(json)?
+                    json:
+                    json.data;
+
+            var count = info?
+                info.count:
+                json.count != null?
+                    json.count:
+                    null;
+
+            var newState = {
+              defaultData: data
+            };
+
+            if (count != null) {
+              newState.defaultDataSourceCount = count;
+            }
+
+            log('recv data and setState')
+            this.setState(newState);
+          }.bind(this), noCatchFn);
+
+        if (dataSource['catch']) {
+          dataSource['catch'](errorFn);
+        }
+      }
+
+      if (props.onDataSourceLoaded) {
+        dataSource.then(props.onDataSourceLoaded);
+      }
+    }
+
+    return dataSource;
+  }
+
   /**
    * Render function
    * svg element needs to have height and width.
    */
   render() {
+    log('render()');
+
+    var props = this.prepareProps(this.props, this.state);
+
+    this.data = props.data;
+    this.dataSource = props.dataSource;
+    this.graphAdded = this.graphAdded || false;
+
     return (
       <div ref="root" className="nv-chart">
         <svg ref="svg" {...pick(this.props, SIZE)}></svg>
