@@ -65,6 +65,15 @@ export default class NVD3Chart extends React.Component {
       nv.addGraph(this.renderChart.bind(this), this.props.renderEnd);
   }
 
+  componentWillReceiveProps(nextProps) {
+    log('componentWillReceiveProps()');
+    // FIXME: props.dataSource is promise. So if days querystring does not change, 
+    // these always are not equal.
+    if (nextProps.dataSource !== this.props.dataSource) {
+      this.loadDataSource(nextProps.dataSource, this.props)
+    }
+  }
+
   /**
    * Creates a chart model and render it
    */

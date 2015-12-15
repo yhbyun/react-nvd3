@@ -173,6 +173,16 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	      this.graphAdded ? this.renderChart() : _nvd2.default.addGraph(this.renderChart.bind(this), this.props.renderEnd);
 	    }
+	  }, {
+	    key: 'componentWillReceiveProps',
+	    value: function componentWillReceiveProps(nextProps) {
+	      log('componentWillReceiveProps()');
+	      log(nextProps.dataSource);
+	      log(this.props.dataSource);
+	      if (nextProps.dataSource !== this.props.dataSource) {
+	        this.loadDataSource(nextProps.dataSource, this.props);
+	      }
+	    }
 
 	    /**
 	     * Creates a chart model and render it
